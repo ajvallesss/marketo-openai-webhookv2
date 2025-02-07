@@ -114,17 +114,25 @@ def webhook():
         return jsonify({"error": str(e)}), 500
 
 
-def get_company_info(company_name):
-    """Fetch company info using OpenAI with updated API calls."""
+def get_company_info(company_name, email=None):
+    """Fetch company info using OpenAI with domain fallback if company not found."""
+    
+    # Extract domain from email if company is missing
+    domain = email.split("@")[-1] if email and "@" in email else None
+
     prompt = f"""
     Find the following details for this company: {company_name}
-    
+
     - GPT_Industry__c: The primary industry sector.
     - GPT_Revenue__c: Estimated annual revenue.
     - GPT_Company_Size__c: Provide one range: ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10,000", "10,000+"]
     - GPT_Fit_Assessment__c: A short blurb (1-2 sentences) about the company's fit.
 
-    Respond in JSON format:
+    If no company information is found for "{company_name}", use the domain "{domain}" (if available) to infer details.
+
+    Search online sources, business directories, and company listings to find industry, revenue, and company size.
+    
+    **Ensure your response is strictly in JSON format**:
     {{
       "GPT_Industry__c": "...",
       "GPT_Revenue__c": "...",
