@@ -116,23 +116,24 @@ def webhook():
 
 def get_company_info(company_name, email=None):
     """Fetch company info using OpenAI with domain fallback if company not found."""
-    
-    # Extract domain from email if company is missing
+
+    # Extract domain from email if company details are missing
     domain = email.split("@")[-1] if email and "@" in email else None
 
     prompt = f"""
-    Find the following details for this company: {company_name}
+    You are an AI assistant tasked with extracting detailed business information. Find the following details for the company: **"{company_name}"**
 
-    - GPT_Industry__c: The primary industry sector.
-    - GPT_Revenue__c: Estimated annual revenue.
-    - GPT_Company_Size__c: Provide one range: ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10,000", "10,000+"]
-    - GPT_Fit_Assessment__c: A short blurb (1-2 sentences) about the company's fit.
+    If you **cannot directly find** details about "{company_name}", **use the domain** "{domain}" (if available) to infer information from publicly available sources such as business directories, LinkedIn, Crunchbase, company websites, or news reports.
 
-    If no company information is found for "{company_name}", use the domain "{domain}" (if available) to infer details.
+    ### **Required Data Points:**
+    - **GPT_Industry__c**: The primary industry sector of the company.
+    - **GPT_Revenue__c**: Estimated annual revenue in USD (e.g., "$10M-$50M").
+    - **GPT_Company_Size__c**: Number of employees in one of the following ranges: ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10,000", "10,000+"].
+    - **GPT_Fit_Assessment__c**: A **brief summary (1-2 sentences)** about what this company does and its market positioning.
 
-    Search online sources, business directories, and company listings to find industry, revenue, and company size.
-    
-    **Ensure your response is strictly in JSON format**:
+    If you **cannot** find specific information, provide the **best possible inference** based on industry standards.
+
+    **Your response must be in valid JSON format** without extra text:
     {{
       "GPT_Industry__c": "...",
       "GPT_Revenue__c": "...",
@@ -167,6 +168,8 @@ def get_company_info(company_name, email=None):
             "GPT_Company_Size__c": "Unknown",
             "GPT_Fit_Assessment__c": "Unknown"
         }
+
+
 
 
 def update_marketo(email, first_name, last_name, industry, revenue, company_size, fit_assessment):
