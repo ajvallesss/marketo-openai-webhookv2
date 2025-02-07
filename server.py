@@ -6,10 +6,15 @@ import os
 app = Flask(__name__)
 
 # Load environment variables
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-MARKETO_CLIENT_ID = os.getenv("MARKETO_CLIENT_ID")
-MARKETO_CLIENT_SECRET = os.getenv("MARKETO_CLIENT_SECRET")
-MARKETO_BASE_URL = os.getenv("MARKETO_BASE_URL")
+OPENAI_API_KEY = os.getenv("openai_api_key")
+MARKETO_CLIENT_ID = os.getenv("marketo_client_id")
+MARKETO_CLIENT_SECRET = os.getenv("marketo_client_secret")
+MARKETO_BASE_URL = os.getenv("marketo_base_url")
+
+@app.route("/")
+def home():
+    """Root route to confirm the app is running."""
+    return "Marketo Webhook is running!", 200
 
 def get_company_info(company_name):
     """Call OpenAI to get GPT Industry, GPT Revenue, GPT Company Size (range), and GPT Company Fit (blurb)."""
@@ -48,9 +53,9 @@ def get_company_info(company_name):
             "GPT Company Fit": "Unknown"
         }
 
-def update_marketo(email, industry, revenue, company_size, company_fit):
+def update_marketo(email, first_name, last_name, industry, revenue, company_size, company_fit):
     """Send enriched data back to Marketo."""
-    access_token = "your-marketo-access-token"  # Replace with function to fetch dynamically
+    access_token = "your-marketo-access-token"  # Replace with a function to fetch dynamically
 
     payload = {
         "action": "createOrUpdate",
@@ -58,6 +63,8 @@ def update_marketo(email, industry, revenue, company_size, company_fit):
         "input": [
             {
                 "email": email,
+                "first_name": first_name,
+                "last_name": last_name,
                 "GPT Industry": industry,
                 "GPT Revenue": revenue,
                 "GPT Company Size": company_size,
@@ -79,6 +86,8 @@ def webhook():
     """Handles webhook request from Marketo."""
     data = request.json
     email = data.get("email")
+    first_name = data.get("first_name", "")
+    last_name = data.get("last_name", "")
     company = data.get("company")
 
     if not email or not company:
@@ -94,9 +103,6 @@ def webhook():
     company_fit = company_info.get("GPT Company Fit", "Unknown")  # Now a short blurb
 
     # Send enriched data back to Marketo
-    marketo_response = update_marketo(email, industry, revenue, company_size, company_fit)
+    marketo_response = update_marketo(email, first_name, last_name, industry, revenue, company_size, company_fit)
 
-    return jsonify({"success": True, "marketo_response": marketo_response})
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    return jsonify({"success": True, "marketo
