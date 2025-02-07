@@ -115,25 +115,25 @@ def webhook():
 
 
 def get_company_info(company_name, email=None):
-    """Fetch company info using OpenAI with domain fallback if company not found."""
+    """Fetch company info using OpenAI with function calling, and use domain if the company is not found."""
 
     # Extract domain from email if company details are missing
     domain = email.split("@")[-1] if email and "@" in email else None
 
     prompt = f"""
-    You are an AI assistant tasked with extracting detailed business information. Find the following details for the company: **"{company_name}"**
+    You are an AI assistant with access to business intelligence data. Your task is to extract business information for the company: **"{company_name}"**.
 
-    If you **cannot directly find** details about "{company_name}", **use the domain** "{domain}" (if available) to infer information from publicly available sources such as business directories, LinkedIn, Crunchbase, company websites, or news reports.
+    If the exact company is not found, **use the domain** "{domain}" (if available) and infer company details based on business directories, LinkedIn, Crunchbase, company websites, and news reports.
 
-    ### **Required Data Points:**
-    - **GPT_Industry__c**: The primary industry sector of the company.
+    **Provide the following details**:
+    - **GPT_Industry__c**: The primary industry sector.
     - **GPT_Revenue__c**: Estimated annual revenue in USD (e.g., "$10M-$50M").
-    - **GPT_Company_Size__c**: Number of employees in one of the following ranges: ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10,000", "10,000+"].
-    - **GPT_Fit_Assessment__c**: A **brief summary (1-2 sentences)** about what this company does and its market positioning.
+    - **GPT_Company_Size__c**: Employee count in these ranges: ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10,000", "10,000+"].
+    - **GPT_Fit_Assessment__c**: A **short blurb (1-2 sentences)** about what this company does.
 
-    If you **cannot** find specific information, provide the **best possible inference** based on industry standards.
+    **If no company data is found, infer details based on the domain and public data sources.**
 
-    **Your response must be in valid JSON format** without extra text:
+    **Respond strictly in JSON format without any additional text**:
     {{
       "GPT_Industry__c": "...",
       "GPT_Revenue__c": "...",
@@ -146,17 +146,31 @@ def get_company_info(company_name, email=None):
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
         response = client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4-turbo",  # NEWER, FASTER, CHEAPER MODEL
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.7
+            functions=[{
+                "name": "get_company_info",
+                "description": "Retrieves structured company information based on available business intelligence data.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "GPT_Industry__c": {"type": "string"},
+                        "GPT_Revenue__c": {"type": "string"},
+                        "GPT_Company_Size__c": {"type": "string"},
+                        "GPT_Fit_Assessment__c": {"type": "string"}
+                    },
+                    "required": ["GPT_Industry__c", "GPT_Revenue__c", "GPT_Company_Size__c", "GPT_Fit_Assessment__c"]
+                }
+            }],
+            temperature=0.5
         )
 
-        if not response.choices or not response.choices[0].message.content.strip():
-            print("🚨 OpenAI Response is empty!")
-            raise ValueError("OpenAI returned an empty response.")
+        if not response.choices or not response.choices[0].message.function_call:
+            print("🚨 OpenAI Function Call Failed!")
+            raise ValueError("OpenAI did not return structured company data.")
 
-        company_info = response.choices[0].message.content.strip()
-        print(f"🧠 Raw OpenAI Response: {company_info}")  # Log full response
+        company_info = response.choices[0].message.function_call.arguments
+        print(f"🧠 OpenAI Response: {company_info}")  # Log full response
 
         return json.loads(company_info)  # Convert JSON string to dictionary
 
@@ -168,7 +182,6 @@ def get_company_info(company_name, email=None):
             "GPT_Company_Size__c": "Unknown",
             "GPT_Fit_Assessment__c": "Unknown"
         }
-
 
 
 
