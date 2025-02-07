@@ -10,6 +10,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MARKETO_CLIENT_ID = os.getenv("MARKETO_CLIENT_ID")
 MARKETO_CLIENT_SECRET = os.getenv("MARKETO_CLIENT_SECRET")
 MARKETO_BASE_URL = os.getenv("MARKETO_BASE_URL")
+MARKETO_ACCESS_TOKEN = "8aecc22e-c75a-409b-b2f6-ff38fb79682a:ab"  # Replace with a valid token
 
 @app.route("/")
 def home():
@@ -24,13 +25,13 @@ def webhook():
         if not data:
             return jsonify({"error": "Invalid JSON"}), 400
 
-        email = data.get("email")
-        first_name = data.get("first_name", "")
-        last_name = data.get("last_name", "")
-        company = data.get("company")
+        email = data.get("Email")
+        first_name = data.get("FirstName", "")
+        last_name = data.get("LastName", "")
+        company = data.get("Company")
 
         if not email or not company:
-            return jsonify({"error": "Missing required fields (email, company)"}), 400
+            return jsonify({"error": "Missing required fields (Email, Company)"}), 400
 
         # Log received data
         print(f"Received: email={email}, company={company}")
@@ -39,10 +40,10 @@ def webhook():
         company_info = get_company_info(company)
 
         # Extract fields
-        industry = company_info.get("GPT Industry", "Unknown")
-        revenue = company_info.get("GPT Revenue", "Unknown")
-        company_size = company_info.get("GPT Company Size", "Unknown")
-        company_fit = company_info.get("GPT Company Fit", "Unknown")
+        industry = company_info.get("GPT_Industry__c", "Unknown")
+        revenue = company_info.get("GPT_Revenue__c", "Unknown")
+        company_size = company_info.get("GPT_Company_Size__c", "Unknown")
+        company_fit = company_info.get("GPT_Fit_Assessment__c", "Unknown")
 
         # Send enriched data to Marketo
         marketo_response = update_marketo(email, first_name, last_name, industry, revenue, company_size, company_fit)
@@ -61,20 +62,19 @@ def get_company_info(company_name):
     prompt = f"""
     Find the following details for this company: {company_name}
     
-    - GPT Industry: The primary industry sector.
-    - GPT Revenue: Estimated annual revenue.
-    - GPT Company Size: Provide one range: ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10,000", "10,000+"]
-    - GPT Company Fit: A short blurb (1-2 sentences) about the company's fit.
+    - GPT_Industry__c: The primary industry sector.
+    - GPT_Revenue__c: Estimated annual revenue.
+    - GPT_Company_Size__c: Provide one range: ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10,000", "10,000+"]
+    - GPT_Fit_Assessment__c: A short blurb (1-2 sentences) about the company's fit.
 
     Respond in JSON format:
     {{
-      "GPT Industry": "...",
-      "GPT Revenue": "...",
-      "GPT Company Size": "...",
-      "GPT Company Fit": "..."
+      "GPT_Industry__c": "...",
+      "GPT_Revenue__c": "...",
+      "GPT_Company_Size__c": "...",
+      "GPT_Fit_Assessment__c": "..."
     }}
     """
-
     try:
         response = openai.ChatCompletion.create(
             model="gpt-4",
@@ -83,45 +83,39 @@ def get_company_info(company_name):
         )
         company_info = response['choices'][0]['message']['content']
         return eval(company_info)  # Convert JSON string to dictionary
-
     except Exception as e:
         print(f"OpenAI Error: {e}")
         return {
-            "GPT Industry": "Unknown",
-            "GPT Revenue": "Unknown",
-            "GPT Company Size": "Unknown",
-            "GPT Company Fit": "Unknown"
+            "GPT_Industry__c": "Unknown",
+            "GPT_Revenue__c": "Unknown",
+            "GPT_Company_Size__c": "Unknown",
+            "GPT_Fit_Assessment__c": "Unknown"
         }
 
 def update_marketo(email, first_name, last_name, industry, revenue, company_size, company_fit):
     """Send enriched data to Marketo."""
     try:
-        access_token = "8aecc22e-c75a-409b-b2f6-ff38fb79682a:ab"  # Replace with real token
-
         payload = {
             "action": "createOrUpdate",
             "lookupField": "email",
             "input": [
                 {
-                    "email": email,
-                    "first_name": first_name,
-                    "last_name": last_name,
-                    "GPT Industry": industry,
-                    "GPT Revenue": revenue,
-                    "GPT Company Size": company_size,
-                    "GPT Company Fit": company_fit
+                    "Email": email,
+                    "FirstName": first_name,
+                    "LastName": last_name,
+                    "GPT_Industry__c": industry,
+                    "GPT_Revenue__c": revenue,
+                    "GPT_Company_Size__c": company_size,
+                    "GPT_Fit_Assessment__c": company_fit
                 }
             ]
         }
-
         headers = {
-            "Authorization": f"Bearer {access_token}",
+            "Authorization": f"Bearer {MARKETO_ACCESS_TOKEN}",
             "Content-Type": "application/json"
         }
-
         response = requests.post(f"{MARKETO_BASE_URL}/rest/v1/leads.json", json=payload, headers=headers)
         return response.json()
-
     except Exception as e:
         print(f"Marketo API Error: {e}")
         return {"error": str(e)}
