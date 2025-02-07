@@ -105,4 +105,7 @@ def webhook():
     # Send enriched data back to Marketo
     marketo_response = update_marketo(email, first_name, last_name, industry, revenue, company_size, company_fit)
 
-    return jsonify({"success": True, "marketo
+    return jsonify({"success": True, "marketo_response": marketo_response})  # ✅ Fixed string!
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
