@@ -114,11 +114,56 @@ def webhook():
         return jsonify({"error": str(e)}), 500
 
 
+# Cache for company data (prevents inconsistencies)
+COMPANY_CACHE = {}
+
+# Standardized Revenue & Employee Size Ranges
+REVENUE_BUCKETS = {
+    "Under $1M": "< $1M",
+    "$1M-$10M": "$1M - $10M",
+    "$10M-$50M": "$10M - $50M",
+    "$50M-$100M": "$50M - $100M",
+    "$100M-$500M": "$100M - $500M",
+    "$500M-$1B": "$500M - $1B",
+    "$1B-$10B": "$1B - $10B",
+    "$10B+": "$10B+"
+}
+
+EMPLOYEE_BUCKETS = {
+    "1-10": "1-10",
+    "11-50": "11-50",
+    "51-200": "51-200",
+    "201-500": "201-500",
+    "501-1000": "501-1000",
+    "1001-5000": "1001-5000",
+    "5001-10000": "5001-10000",
+    "10000+": "10000+"
+}
+
+def standardize_revenue(value):
+    """Normalize revenue into a predefined bucket."""
+    for key, bucket in REVENUE_BUCKETS.items():
+        if key in value:
+            return bucket
+    return "Unknown"
+
+def standardize_employee_size(value):
+    """Normalize employee size into a predefined bucket."""
+    for key, bucket in EMPLOYEE_BUCKETS.items():
+        if key in value:
+            return bucket
+    return "Unknown"
+
 def get_company_info(company_name, email=None):
-    """Fetch company info using OpenAI with function calling, and use domain if the company is not found."""
+    """Fetch company info using OpenAI, using the domain if the company isn't found."""
 
     # Extract domain from email if company details are missing
     domain = email.split("@")[-1] if email and "@" in email else None
+
+    # Check if we already processed this company
+    if company_name in COMPANY_CACHE:
+        print(f"✅ Using Cached Data for {company_name}")
+        return COMPANY_CACHE[company_name]
 
     prompt = f"""
     You are an AI assistant with access to business intelligence data. Your task is to extract business information for the company: **"{company_name}"**.
@@ -127,9 +172,12 @@ def get_company_info(company_name, email=None):
 
     **Provide the following details**:
     - **GPT_Industry__c**: The primary industry sector.
-    - **GPT_Revenue__c**: Estimated annual revenue in USD (e.g., "$10M-$50M").
+    - **GPT_Revenue__c**: Estimated annual revenue in USD. Pick only **one** of these standard ranges:
+      ["Under $1M", "$1M-$10M", "$10M-$50M", "$50M-$100M", "$100M-$500M", "$500M-$1B", "$1B-$10B", "$10B+"]
     - **GPT_Company_Size__c**: Employee count in these ranges: ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10,000", "10,000+"].
-    - **GPT_Fit_Assessment__c**: A **short blurb (1-2 sentences)** about what this company does.
+    - **GPT_Fit_Assessment__c**: Would this company be a **good fit for Coalesce.io**? 
+      - If **yes**, explain why in 1-2 sentences.
+      - If **no**, briefly explain why it might not be an ideal fit.
 
     **If no company data is found, infer details based on the domain and public data sources.**
 
@@ -146,33 +194,27 @@ def get_company_info(company_name, email=None):
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
         response = client.chat.completions.create(
-            model="gpt-4-turbo",  # NEWER, FASTER, CHEAPER MODEL
+            model="gpt-4-turbo",
             messages=[{"role": "user", "content": prompt}],
-            functions=[{
-                "name": "get_company_info",
-                "description": "Retrieves structured company information based on available business intelligence data.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "GPT_Industry__c": {"type": "string"},
-                        "GPT_Revenue__c": {"type": "string"},
-                        "GPT_Company_Size__c": {"type": "string"},
-                        "GPT_Fit_Assessment__c": {"type": "string"}
-                    },
-                    "required": ["GPT_Industry__c", "GPT_Revenue__c", "GPT_Company_Size__c", "GPT_Fit_Assessment__c"]
-                }
-            }],
             temperature=0.5
         )
 
-        if not response.choices or not response.choices[0].message.function_call:
-            print("🚨 OpenAI Function Call Failed!")
-            raise ValueError("OpenAI did not return structured company data.")
+        if not response.choices or not response.choices[0].message.content.strip():
+            print("🚨 OpenAI Response is empty!")
+            raise ValueError("OpenAI returned an empty response.")
 
-        company_info = response.choices[0].message.function_call.arguments
-        print(f"🧠 OpenAI Response: {company_info}")  # Log full response
+        company_info = response.choices[0].message.content.strip()
+        parsed_company_info = json.loads(company_info)
 
-        return json.loads(company_info)  # Convert JSON string to dictionary
+        # Standardize Revenue & Employee Size
+        parsed_company_info["GPT_Revenue__c"] = standardize_revenue(parsed_company_info["GPT_Revenue__c"])
+        parsed_company_info["GPT_Company_Size__c"] = standardize_employee_size(parsed_company_info["GPT_Company_Size__c"])
+
+        # Cache the result so all future leads from this company are **consistent**
+        COMPANY_CACHE[company_name] = parsed_company_info
+        print(f"🧠 Cached Company Data: {parsed_company_info}")
+
+        return parsed_company_info
 
     except Exception as e:
         print(f"🚨 OpenAI Error: {e}")
