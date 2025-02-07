@@ -62,11 +62,11 @@ def get_marketo_access_token():
 
     try:
         response = requests.get(token_url, params=params)
-        response.raise_for_status()
+        response.raise_for_status()  # Raise error if request fails
         token_data = response.json()
 
         MARKETO_ACCESS_TOKEN = token_data["access_token"]
-        MARKETO_TOKEN_EXPIRY = time.time() + token_data["expires_in"] - 60
+        MARKETO_TOKEN_EXPIRY = time.time() + token_data["expires_in"] - 60  # Buffer time
 
         print("✅ New Marketo Token Acquired")
         return MARKETO_ACCESS_TOKEN
@@ -74,12 +74,49 @@ def get_marketo_access_token():
         print(f"🚨 Marketo Token Error: {e}")
         return None
 
+def update_marketo(email, first_name, last_name, industry, revenue, company_size, fit_assessment):
+    """Send enriched data to Marketo."""
+    try:
+        access_token = get_marketo_access_token()  # Ensure valid token
+
+        if not access_token:
+            return {"error": "Failed to retrieve Marketo access token"}
+
+        payload = {
+            "action": "createOrUpdate",
+            "lookupField": "email",
+            "input": [
+                {
+                    "Email": email,
+                    "FirstName": first_name,
+                    "LastName": last_name,
+                    "GPT_Industry__c": industry,
+                    "GPT_Revenue__c": revenue,
+                    "GPT_Company_Size__c": company_size,
+                    "GPT_Fit_Assessment__c": fit_assessment
+                }
+            ]
+        }
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post(f"{MARKETO_BASE_URL}/rest/v1/leads.json", json=payload, headers=headers)
+        
+        print(f"📨 Marketo Response: {response.status_code} {response.text}")
+
+        return response.json()
+
+    except Exception as e:
+        print(f"🚨 Marketo API Error: {e}")
+        return {"error": str(e)}
 
 @app.route("/")
 def home():
     """Confirm the app is running."""
     return "Marketo Webhook is running!", 200
-
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -96,6 +133,7 @@ def webhook():
         if not request.is_json:
             return jsonify({"error": "Unsupported Media Type. Expected application/json"}), 415
 
+        # Attempt to parse JSON safely
         try:
             data = json.loads(cleaned_data)
         except json.JSONDecodeError as e:
@@ -116,7 +154,7 @@ def webhook():
         # Get enriched company details from OpenAI
         company_info = get_company_info(company, email)
 
-        # Extract and standardize fields
+        # Extract OpenAI-generated fields
         industry = company_info.get("GPT_Industry__c", "Unknown")
         revenue = standardize_revenue(company_info.get("GPT_Revenue__c", "Unknown"))
         company_size = standardize_employee_size(company_info.get("GPT_Company_Size__c", "Unknown"))
@@ -129,29 +167,19 @@ def webhook():
 
         print(f"📨 Marketo Response: {marketo_response}")
 
-        return jsonify({"success": True, "marketo_response": marketo_response})
+        return jsonify({
+            "success": True,
+            "marketo_response": marketo_response
+        })
 
     except Exception as e:
         print(f"🚨 Webhook Error: {e}")
         return jsonify({"error": str(e)}), 500
 
-
-def standardize_revenue(value):
-    """Normalize revenue into a predefined bucket."""
-    for key, bucket in REVENUE_BUCKETS.items():
-        if key in value:
-            return bucket
-    return "Unknown"
-
-def standardize_employee_size(value):
-    """Normalize employee size into a predefined bucket."""
-    for key, bucket in EMPLOYEE_BUCKETS.items():
-        if key in value:
-            return bucket
-    return "Unknown"
-
 def get_company_info(company_name, email=None):
-    """Fetch company info using OpenAI, using domain-based inference if necessary."""
+    """Fetch company info using OpenAI, using the domain if the company isn't found."""
+
+    # Extract domain from email if company details are missing
     domain = email.split("@")[-1] if email and "@" in email else None
 
     if company_name in COMPANY_CACHE:
@@ -159,19 +187,16 @@ def get_company_info(company_name, email=None):
         return COMPANY_CACHE[company_name]
 
     prompt = f"""
-    You are an AI trained to extract company information from business databases like LinkedIn, Crunchbase, and industry directories.
+    Find business information for: **"{company_name}"**.
+    If the exact company is not found, **use the domain** "{domain}" and infer details.
 
-    If the company "{company_name}" is not found, **use the domain "{domain}"** (if available) to infer details.
+    Provide:
+    - **GPT_Industry__c**: Primary industry.
+    - **GPT_Revenue__c**: Choose **one**: {list(REVENUE_BUCKETS.keys())}.
+    - **GPT_Company_Size__c**: Choose **one**: {list(EMPLOYEE_BUCKETS.keys())}.
+    - **GPT_Fit_Assessment__c**: Would this company be a **good fit for Coalesce.io**? Explain why.
 
-    **Required Data:**
-    - **GPT_Industry__c**: Primary industry sector.
-    - **GPT_Revenue__c**: Estimated annual revenue. Pick from: ["Under $1M", "$1M-$10M", "$10M-$50M", "$50M-$100M", "$100M-$500M", "$500M-$1B", "$1B-$10B", "$10B+"].
-    - **GPT_Company_Size__c**: Employee count in ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10,000", "10,000+"].
-    - **GPT_Fit_Assessment__c**: Would this company be a **good fit for Coalesce.io**? If yes, explain why. If no, explain why not.
-
-    **DO NOT return "Unknown". If no direct data is available, infer based on similar companies.**
-
-    Respond in **strict JSON format**:
+    **Respond in JSON format**:
     {{
       "GPT_Industry__c": "...",
       "GPT_Revenue__c": "...",
@@ -190,12 +215,13 @@ def get_company_info(company_name, email=None):
         )
 
         company_info = json.loads(response.choices[0].message.content.strip())
+
         COMPANY_CACHE[company_name] = company_info
         return company_info
 
     except Exception as e:
         print(f"🚨 OpenAI Error: {e}")
-        return {"GPT_Industry__c": "Unknown", "GPT_Revenue__c": "Unknown", "GPT_Company_Size__c": "Unknown", "GPT_Fit_Assessment__c": "Unknown"}
+        return {key: "Unknown" for key in REVENUE_BUCKETS.keys()}
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
