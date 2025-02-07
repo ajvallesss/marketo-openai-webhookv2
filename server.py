@@ -162,8 +162,6 @@ def get_company_info(company_name, email=None):
     - **GPT_Company_Size__c**: One of these standardized ranges: {list(EMPLOYEE_BUCKETS.keys())}.
     - **GPT_Fit_Assessment__c**: Would this company be a good fit for Coalesce.io? If yes, explain why in 1-2 sentences.
 
-    **If no company data is found, infer details based on the domain and public data sources.**
-
     **Respond strictly in JSON format**:
     {{
       "GPT_Industry__c": "...",
@@ -182,11 +180,10 @@ def get_company_info(company_name, email=None):
             temperature=0.5
         )
 
-        company_info = json.loads(response.choices[0].message.content.strip())
+        if not response.choices or not response.choices[0].message.content.strip():
+            raise ValueError("OpenAI returned an empty response.")
 
-        # Standardize revenue and employee size
-        company_info["GPT_Revenue__c"] = REVENUE_BUCKETS.get(company_info["GPT_Revenue__c"], "Unknown")
-        company_info["GPT_Company_Size__c"] = EMPLOYEE_BUCKETS.get(company_info["GPT_Company_Size__c"], "Unknown")
+        company_info = json.loads(response.choices[0].message.content.strip())
 
         # Cache company data
         COMPANY_CACHE[company_name] = company_info
