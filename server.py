@@ -49,7 +49,7 @@ def get_marketo_access_token():
     global MARKETO_ACCESS_TOKEN, MARKETO_TOKEN_EXPIRY
 
     if time.time() < MARKETO_TOKEN_EXPIRY:
-        return MARKETO_ACCESS_TOKEN  # Return cached token if still valid
+        return MARKETO_ACCESS_TOKEN  
 
     print("🔄 Fetching new Marketo access token...")
 
@@ -66,7 +66,7 @@ def get_marketo_access_token():
         token_data = response.json()
 
         MARKETO_ACCESS_TOKEN = token_data["access_token"]
-        MARKETO_TOKEN_EXPIRY = time.time() + token_data["expires_in"] - 60  # Buffer time
+        MARKETO_TOKEN_EXPIRY = time.time() + token_data["expires_in"] - 60  
 
         print("✅ New Marketo Token Acquired")
         return MARKETO_ACCESS_TOKEN
@@ -179,7 +179,4 @@ def get_company_info(company_name, email=None):
 
     except Exception as e:
         print(f"🚨 OpenAI Error: {e}")
-        return {"GPT_Industry__c": "Unknown", "GPT_Revenue__c": "Unknown", "GPT_Company_Size__c": "Unknown", "GPT_Fit_Assessment__c": "Unknown"}
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+        return {"GPT_Industry__c": "Unknown", "GPT_Revenue__c": "Unknown", "GPT_Company_Size__c": "Unknown", "GPT_Fit_Assess
