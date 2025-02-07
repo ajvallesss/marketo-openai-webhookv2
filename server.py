@@ -201,5 +201,33 @@ def get_company_info(company_name, email=None):
         }
 
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+def update_marketo(email, first_name, last_name, industry, revenue, company_size, fit_assessment):
+    """Send enriched data to Marketo."""
+    try:
+        access_token = get_marketo_access_token()  # Ensure valid token
+
+        if not access_token:
+            return {"error": "Failed to retrieve Marketo access token"}
+
+        payload = {
+            "action": "createOrUpdate",
+            "lookupField": "email",
+            "input": [
+                {
+                    "Email": email,
+                    "FirstName": first_name,
+                    "LastName": last_name,
+                    "GPT_Industry__c": industry,
+                    "GPT_Revenue__c": revenue,
+                    "GPT_Company_Size__c": company_size,
+                    "GPT_Fit_Assessment__c": fit_assessment
+                }
+            ]
+        }
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        response = 
