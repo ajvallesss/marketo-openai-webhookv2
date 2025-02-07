@@ -96,7 +96,7 @@ def get_company_info(company_name):
 def update_marketo(email, first_name, last_name, industry, revenue, company_size, company_fit):
     """Send enriched data to Marketo."""
     try:
-        access_token = "your-marketo-access-token"  # Replace with real token
+        access_token = "8aecc22e-c75a-409b-b2f6-ff38fb79682a:ab"  # Replace with real token
 
         payload = {
             "action": "createOrUpdate",
