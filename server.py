@@ -89,7 +89,7 @@ def webhook():
         print(f"✅ Received: email={email}, company={company}")
 
         # Get enriched company details from OpenAI
-        company_info = get_company_info(company, email)
+        company_info = get_company_info(company)
 
         # Extract OpenAI-generated fields
         industry = company_info.get("GPT_Industry__c", "Unknown")
@@ -115,23 +115,25 @@ def webhook():
 
 
 def get_company_info(company_name, email=None):
-    """Fetch company info using OpenAI, using the domain if the company isn't found."""
+    """Fetch company info using OpenAI with function calling, and use domain if the company is not found."""
 
     # Extract domain from email if company details are missing
     domain = email.split("@")[-1] if email and "@" in email else None
 
     prompt = f"""
-    Find business information for the company: **"{company_name}"**.
+    You are an AI assistant with access to business intelligence data. Your task is to extract business information for the company: **"{company_name}"**.
 
-    If this company is not found, infer details using the domain "{domain}" (if available) and search publicly available data like LinkedIn, Crunchbase, and company websites.
+    If the exact company is not found, **use the domain** "{domain}" (if available) and infer company details based on business directories, LinkedIn, Crunchbase, company websites, and news reports.
 
-    Provide the following structured details:
+    **Provide the following details**:
     - **GPT_Industry__c**: The primary industry sector.
     - **GPT_Revenue__c**: Estimated annual revenue in USD (e.g., "$10M-$50M").
     - **GPT_Company_Size__c**: Employee count in these ranges: ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10,000", "10,000+"].
-    - **GPT_Fit_Assessment__c**: Would this company be a good fit for Coalesce.io? If so, explain why in 1-2 sentences.
+    - **GPT_Fit_Assessment__c**: A **short blurb (1-2 sentences)** about what this company does.
 
-    **Return ONLY a JSON response**:
+    **If no company data is found, infer details based on the domain and public data sources.**
+
+    **Respond strictly in JSON format without any additional text**:
     {{
       "GPT_Industry__c": "...",
       "GPT_Revenue__c": "...",
@@ -144,20 +146,43 @@ def get_company_info(company_name, email=None):
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
         response = client.chat.completions.create(
-            model="gpt-4-turbo",
+            model="gpt-4-turbo",  # NEWER, FASTER, CHEAPER MODEL
             messages=[{"role": "user", "content": prompt}],
+            functions=[{
+                "name": "get_company_info",
+                "description": "Retrieves structured company information based on available business intelligence data.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "GPT_Industry__c": {"type": "string"},
+                        "GPT_Revenue__c": {"type": "string"},
+                        "GPT_Company_Size__c": {"type": "string"},
+                        "GPT_Fit_Assessment__c": {"type": "string"}
+                    },
+                    "required": ["GPT_Industry__c", "GPT_Revenue__c", "GPT_Company_Size__c", "GPT_Fit_Assessment__c"]
+                }
+            }],
             temperature=0.5
         )
 
-        company_info = json.loads(response.choices[0].message.content.strip())
+        if not response.choices or not response.choices[0].message.function_call:
+            print("🚨 OpenAI Function Call Failed!")
+            raise ValueError("OpenAI did not return structured company data.")
 
+        company_info = response.choices[0].message.function_call.arguments
         print(f"🧠 OpenAI Response: {company_info}")  # Log full response
 
-        return company_info
+        return json.loads(company_info)  # Convert JSON string to dictionary
 
     except Exception as e:
         print(f"🚨 OpenAI Error: {e}")
-        return {k: "Unknown" for k in ["GPT_Industry__c", "GPT_Revenue__c", "GPT_Company_Size__c", "GPT_Fit_Assessment__c"]}
+        return {
+            "GPT_Industry__c": "Unknown",
+            "GPT_Revenue__c": "Unknown",
+            "GPT_Company_Size__c": "Unknown",
+            "GPT_Fit_Assessment__c": "Unknown"
+        }
+
 
 
 def update_marketo(email, first_name, last_name, industry, revenue, company_size, fit_assessment):
