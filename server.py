@@ -5,18 +5,16 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Load Marketo credentials from environment variables
+# Load API credentials from environment variables
 MARKETO_CLIENT_ID = os.getenv("MARKETO_CLIENT_ID")
 MARKETO_CLIENT_SECRET = os.getenv("MARKETO_CLIENT_SECRET")
 MARKETO_BASE_URL = os.getenv("MARKETO_BASE_URL")  # Example: "https://841-CLM-681.mktorest.com"
-MARKETO_ACCESS_TOKEN = os.getenv("MARKETO_ACCESS_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # OpenAI API key
+MARKETO_ACCESS_TOKEN = None  # Will be retrieved dynamically
 
 def get_marketo_access_token():
-    """Retrieve a new Marketo access token if not set or expired."""
+    """Retrieve a new Marketo access token."""
     global MARKETO_ACCESS_TOKEN
-
-    if not MARKETO_CLIENT_ID or not MARKETO_CLIENT_SECRET or not MARKETO_BASE_URL:
-        return None
 
     url = f"{MARKETO_BASE_URL}/oauth/token"
     params = {
@@ -35,9 +33,46 @@ def get_marketo_access_token():
         print(f"Failed to get Marketo token: {response.json()}")
         return None
 
+def enrich_data_with_openai(data):
+    """Send data to OpenAI and enrich it with GPT fields."""
+    try:
+        headers = {
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Content-Type": "application/json"
+        }
+
+        openai_payload = {
+            "model": "gpt-4",  # Use appropriate GPT model
+            "messages": [
+                {"role": "system", "content": "You are a B2B data enrichment assistant."},
+                {"role": "user", "content": f"Enrich the following company data:\n{json.dumps(data, indent=2)}"}
+            ]
+        }
+
+        response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=openai_payload)
+
+        if response.status_code == 200:
+            gpt_response = response.json()
+            enriched_data = json.loads(gpt_response["choices"][0]["message"]["content"])
+
+            # Ensure only expected fields are returned
+            return {
+                "GPT_Revenue__c": enriched_data.get("GPT_Revenue__c", ""),
+                "GPT_Industry__c": enriched_data.get("GPT_Industry__c", ""),
+                "GPT_Fit_Assessment__c": enriched_data.get("GPT_Fit_Assessment__c", ""),
+                "GPT_Company_Size__c": enriched_data.get("GPT_Company_Size__c", "")
+            }
+        else:
+            print(f"OpenAI API Error: {response.json()}")
+            return {}
+
+    except Exception as e:
+        print(f"Error enriching data with OpenAI: {str(e)}")
+        return {}
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    """Handle webhook requests and send data to Marketo."""
+    """Handle webhook from Marketo, enrich data with OpenAI, and send back to Marketo."""
     global MARKETO_ACCESS_TOKEN
 
     if not MARKETO_ACCESS_TOKEN:
@@ -55,14 +90,31 @@ def webhook():
             "Content-Type": "application/json"
         }
 
-        response = requests.post(marketo_url, headers=headers, json={"action": "createOrUpdate", "input": [data]})
+        # Enrich data using OpenAI
+        enriched_data = enrich_data_with_openai(data)
+
+        # Combine original Marketo fields with enriched GPT fields
+        marketo_data = {
+            "action": "createOrUpdate",
+            "lookupField": "email",
+            "input": [{
+                "Email": data.get("email"),
+                "FirstName": data.get("first_name"),  # Corrected field name
+                "LastName": data.get("last_name"),    # Corrected field name
+                "Company": data.get("company"),
+                **enriched_data  # Add GPT-enriched fields
+            }]
+        }
+
+        # Send enriched data back to Marketo
+        response = requests.post(marketo_url, headers=headers, json=marketo_data)
         marketo_response = response.json()
 
-        # Handle token expiration and retry
+        # Handle token expiration and retry if needed
         if "errors" in marketo_response and marketo_response["errors"][0]["code"] == "601":
-            MARKETO_ACCESS_TOKEN = get_marketo_access_token()  # Get a new token
+            MARKETO_ACCESS_TOKEN = get_marketo_access_token()  # Refresh token
             headers["Authorization"] = f"Bearer {MARKETO_ACCESS_TOKEN}"
-            response = requests.post(marketo_url, headers=headers, json={"action": "createOrUpdate", "input": [data]})
+            response = requests.post(marketo_url, headers=headers, json=marketo_data)
             marketo_response = response.json()
 
         return jsonify({"marketo_response": marketo_response, "success": True})
