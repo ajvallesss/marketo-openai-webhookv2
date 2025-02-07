@@ -6,10 +6,10 @@ import os
 app = Flask(__name__)
 
 # Load environment variables
-OPENAI_API_KEY = os.getenv("openai_api_key")
-MARKETO_CLIENT_ID = os.getenv("marketo_client_id")
-MARKETO_CLIENT_SECRET = os.getenv("marketo_client_secret")
-MARKETO_BASE_URL = os.getenv("marketo_base_url")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+MARKETO_CLIENT_ID = os.getenv("MARKETO_CLIENT_ID")
+MARKETO_CLIENT_SECRET = os.getenv("MARKETO_CLIENT_SECRET")
+MARKETO_BASE_URL = os.getenv("MARKETO_BASE_URL")
 
 @app.route("/")
 def home():
@@ -105,7 +105,10 @@ def webhook():
     # Send enriched data back to Marketo
     marketo_response = update_marketo(email, first_name, last_name, industry, revenue, company_size, company_fit)
 
-    return jsonify({"success": True, "marketo_response": marketo_response})  # ✅ Fixed string!
+    return jsonify({
+        "success": True,
+        "marketo_response": marketo_response
+    })  # ✅ Fixed closing braces & quotes
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
