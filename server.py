@@ -25,10 +25,10 @@ def webhook():
         if not data:
             return jsonify({"error": "Invalid JSON"}), 400
 
-        email = data.get("Email")
-        first_name = data.get("FirstName", "")
-        last_name = data.get("LastName", "")
-        company = data.get("Company")
+email = data.get("email") or data.get("Email")
+first_name = data.get("first_name") or data.get("FirstName", "")
+last_name = data.get("last_name") or data.get("LastName", "")
+company = data.get("company") or data.get("Company")
 
         if not email or not company:
             return jsonify({"error": "Missing required fields (Email, Company)"}), 400
