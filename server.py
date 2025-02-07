@@ -3,6 +3,7 @@ import openai
 import requests
 import os
 import json
+import re  # Import regex to clean extra quotes
 
 app = Flask(__name__)
 
@@ -25,13 +26,16 @@ def webhook():
         raw_request_data = request.data.decode("utf-8")
         print(f"Raw Request Data: {raw_request_data}")
 
+        # Remove extra double quotes from field values
+        cleaned_data = re.sub(r'""([^""]*)""', r'"\1"', raw_request_data)
+
         # Ensure request is JSON
         if not request.is_json:
             return jsonify({"error": "Unsupported Media Type. Expected application/json"}), 415
 
         # Attempt to parse JSON safely
         try:
-            data = json.loads(raw_request_data)
+            data = json.loads(cleaned_data)
         except json.JSONDecodeError as e:
             print(f"JSON Parsing Error: {e}")
             return jsonify({"error": "Invalid JSON format"}), 400
