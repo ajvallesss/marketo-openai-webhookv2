@@ -18,46 +18,6 @@ MARKETO_BASE_URL = os.getenv("MARKETO_BASE_URL")
 MARKETO_ACCESS_TOKEN = None
 MARKETO_TOKEN_EXPIRY = 0  # Unix timestamp
 
-# Cache for company data (prevents inconsistencies)
-COMPANY_CACHE = {}
-
-# Standardized Revenue & Employee Size Ranges
-REVENUE_BUCKETS = {
-    "Under $1M": "< $1M",
-    "$1M-$10M": "$1M - $10M",
-    "$10M-$50M": "$10M - $50M",
-    "$50M-$100M": "$50M - $100M",
-    "$100M-$500M": "$100M - $500M",
-    "$500M-$1B": "$500M - $1B",
-    "$1B-$10B": "$1B - $10B",
-    "$10B+": "$10B+"
-}
-
-EMPLOYEE_BUCKETS = {
-    "1-10": "1-10",
-    "11-50": "11-50",
-    "51-200": "51-200",
-    "201-500": "201-500",
-    "501-1000": "501-1000",
-    "1001-5000": "1001-5000",
-    "5001-10000": "5001-10000",
-    "10000+": "10000+"
-}
-
-def standardize_revenue(value):
-    """Normalize revenue into a predefined bucket."""
-    for key, bucket in REVENUE_BUCKETS.items():
-        if key in value:
-            return bucket
-    return "Unknown"
-
-def standardize_employee_size(value):
-    """Normalize employee size into a predefined bucket."""
-    for key, bucket in EMPLOYEE_BUCKETS.items():
-        if key in value:
-            return bucket
-    return "Unknown"
-
 def get_marketo_access_token():
     """Fetch a new Marketo access token if expired."""
     global MARKETO_ACCESS_TOKEN, MARKETO_TOKEN_EXPIRY
@@ -88,49 +48,12 @@ def get_marketo_access_token():
         print(f"🚨 Marketo Token Error: {e}")
         return None
 
-def update_marketo(email, first_name, last_name, industry, revenue, company_size, fit_assessment):
-    """Send enriched data to Marketo."""
-    try:
-        access_token = get_marketo_access_token()  # Ensure valid token
-
-        if not access_token:
-            return {"error": "Failed to retrieve Marketo access token"}
-
-        payload = {
-            "action": "createOrUpdate",
-            "lookupField": "email",
-            "input": [
-                {
-                    "Email": email,
-                    "FirstName": first_name,
-                    "LastName": last_name,
-                    "GPT_Industry__c": industry,
-                    "GPT_Revenue__c": revenue,
-                    "GPT_Company_Size__c": company_size,
-                    "GPT_Fit_Assessment__c": fit_assessment
-                }
-            ]
-        }
-
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json"
-        }
-
-        response = requests.post(f"{MARKETO_BASE_URL}/rest/v1/leads.json", json=payload, headers=headers)
-        
-        print(f"📨 Marketo Response: {response.status_code} {response.text}")
-
-        return response.json()
-
-    except Exception as e:
-        print(f"🚨 Marketo API Error: {e}")
-        return {"error": str(e)}
 
 @app.route("/")
 def home():
     """Confirm the app is running."""
     return "Marketo Webhook is running!", 200
+
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -170,8 +93,8 @@ def webhook():
 
         # Extract OpenAI-generated fields
         industry = company_info.get("GPT_Industry__c", "Unknown")
-        revenue = standardize_revenue(company_info.get("GPT_Revenue__c", "Unknown"))
-        company_size = standardize_employee_size(company_info.get("GPT_Company_Size__c", "Unknown"))
+        revenue = company_info.get("GPT_Revenue__c", "Unknown")
+        company_size = company_info.get("GPT_Company_Size__c", "Unknown")
         fit_assessment = company_info.get("GPT_Fit_Assessment__c", "Unknown")
 
         print(f"🧠 OpenAI Response: {company_info}")
@@ -190,6 +113,41 @@ def webhook():
         print(f"🚨 Webhook Error: {e}")
         return jsonify({"error": str(e)}), 500
 
+
+# Cache for company data (prevents inconsistencies)
+COMPANY_CACHE = {}
+
+# Standardized Revenue & Employee Size Ranges
+REVENUE_BUCKETS = {
+    "Under $1M": "< $1M",
+    "$1M-$10M": "$1M - $10M",
+    "$10M-$50M": "$10M - $50M",
+    "$50M-$100M": "$50M - $100M",
+    "$100M-$500M": "$100M - $500M",
+    "$500M-$1B": "$500M - $1B",
+    "$1B-$10B": "$1B - $10B",
+    "$10B+": "$10B+"
+}
+
+EMPLOYEE_BUCKETS = {
+    "1-10": "1-10",
+    "11-50": "11-50",
+    "51-200": "51-200",
+    "201-500": "201-500",
+    "501-1000": "501-1000",
+    "1001-5000": "1001-5000",
+    "5001-10000": "5001-10000",
+    "10000+": "10000+"
+}
+
+def standardize_revenue(value):
+    """Normalize revenue into a predefined bucket."""
+    return REVENUE_BUCKETS.get(value, "Unknown")
+
+def standardize_employee_size(value):
+    """Normalize employee size into a predefined bucket."""
+    return EMPLOYEE_BUCKETS.get(value, "Unknown")
+
 def get_company_info(company_name, email=None):
     """Fetch company info using OpenAI, using the domain if the company isn't found."""
 
@@ -202,22 +160,17 @@ def get_company_info(company_name, email=None):
         return COMPANY_CACHE[company_name]
 
     prompt = f"""
-    You are an AI assistant with access to business intelligence data. Your task is to extract business information for the company: **"{company_name}"**.
+    Find detailed business information for the company: **"{company_name}"**.
 
-    If the exact company is not found, **use the domain** "{domain}" (if available) and infer company details based on business directories, LinkedIn, Crunchbase, company websites, and news reports.
+    If this company is not found, infer details using the domain "{domain}" (if available) and search publicly available data like LinkedIn, Crunchbase, and company websites.
 
-    **Provide the following details**:
+    Provide the following structured details:
     - **GPT_Industry__c**: The primary industry sector.
-    - **GPT_Revenue__c**: Estimated annual revenue in USD. Pick only **one** of these standard ranges:
-      ["Under $1M", "$1M-$10M", "$10M-$50M", "$50M-$100M", "$100M-$500M", "$500M-$1B", "$1B-$10B", "$10B+"]
-    - **GPT_Company_Size__c**: Employee count in these ranges: ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10,000", "10,000+"].
-    - **GPT_Fit_Assessment__c**: Would this company be a **good fit for Coalesce.io**? 
-      - If **yes**, explain why in 1-2 sentences.
-      - If **no**, briefly explain why it might not be an ideal fit.
+    - **GPT_Revenue__c**: Estimated annual revenue. Choose one range: ["Under $1M", "$1M-$10M", "$10M-$50M", "$50M-$100M", "$100M-$500M", "$500M-$1B", "$1B-$10B", "$10B+"].
+    - **GPT_Company_Size__c**: Employee count range: ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10,000", "10,000+"].
+    - **GPT_Fit_Assessment__c**: Would this company be a good fit for Coalesce.io? If so, explain why in 1-2 sentences.
 
-    **If no company data is found, infer details based on the domain and public data sources.**
-
-    **Respond strictly in JSON format without any additional text**:
+    **Return ONLY a JSON response**:
     {{
       "GPT_Industry__c": "...",
       "GPT_Revenue__c": "...",
@@ -235,66 +188,18 @@ def get_company_info(company_name, email=None):
             temperature=0.5
         )
 
-        # Handle cases where OpenAI returns an empty response
-        if not response.choices or not response.choices[0].message.content.strip():
-            print("🚨 OpenAI Response is empty!")
-            raise ValueError("OpenAI returned an empty response.")
-
-        company_info = response.choices[0].message.content.strip()
-        parsed_company_info = json.loads(company_info)
-
-        # Debugging logs
-        print(f"🧠 Raw OpenAI Response: {parsed_company_info}")
-
-        # Standardize Revenue & Employee Size
-        parsed_company_info["GPT_Revenue__c"] = standardize_revenue(parsed_company_info.get("GPT_Revenue__c", "Unknown"))
-        parsed_company_info["GPT_Company_Size__c"] = standardize_employee_size(parsed_company_info.get("GPT_Company_Size__c", "Unknown"))
-
-        # If OpenAI response is still "Unknown," log a warning
-        if parsed_company_info["GPT_Revenue__c"] == "Unknown" or parsed_company_info["GPT_Company_Size__c"] == "Unknown":
-            print(f"⚠️ OpenAI did not find valid data for {company_name}. Check if the company name is accurate.")
-
-        # Cache the result so all future leads from this company are **consistent**
-        COMPANY_CACHE[company_name] = parsed_company_info
-        print(f"🧠 Cached Company Data: {parsed_company_info}")
-
-        return parsed_company_info
-
-    except json.JSONDecodeError as json_err:
-        print(f"🚨 JSON Decoding Error from OpenAI: {json_err}")
-        return {
-            "GPT_Industry__c": "Unknown",
-            "GPT_Revenue__c": "Unknown",
-            "GPT_Company_Size__c": "Unknown",
-            "GPT_Fit_Assessment__c": "Unknown"
-        }
-    except Exception as e:
-        print(f"🚨 OpenAI Error: {e}")
-        return {
-            "GPT_Industry__c": "Unknown",
-            "GPT_Revenue__c": "Unknown",
-            "GPT_Company_Size__c": "Unknown",
-            "GPT_Fit_Assessment__c": "Unknown"
-        }
-    """
-
-    try:
-        client = openai.OpenAI(api_key=OPENAI_API_KEY)
-
-        response = client.chat.completions.create(
-            model="gpt-4-turbo",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.5
-        )
-
         company_info = json.loads(response.choices[0].message.content.strip())
+
+        company_info["GPT_Revenue__c"] = standardize_revenue(company_info.get("GPT_Revenue__c", "Unknown"))
+        company_info["GPT_Company_Size__c"] = standardize_employee_size(company_info.get("GPT_Company_Size__c", "Unknown"))
 
         COMPANY_CACHE[company_name] = company_info
         return company_info
 
     except Exception as e:
         print(f"🚨 OpenAI Error: {e}")
-        return {key: "Unknown" for key in REVENUE_BUCKETS.keys()}
+        return {k: "Unknown" for k in ["GPT_Industry__c", "GPT_Revenue__c", "GPT_Company_Size__c", "GPT_Fit_Assessment__c"]}
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
