@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import openai
 import requests
 import os
+import json
 
 app = Flask(__name__)
 
@@ -21,17 +22,21 @@ def webhook():
     """Handles webhook requests from Marketo."""
     try:
         # Log raw request for debugging
-        print(f"Raw Request Data: {request.data}")
+        raw_request_data = request.data.decode("utf-8")
+        print(f"Raw Request Data: {raw_request_data}")
 
         # Ensure request is JSON
         if not request.is_json:
             return jsonify({"error": "Unsupported Media Type. Expected application/json"}), 415
 
-        data = request.json  # Parse JSON payload
-        if not data:
-            return jsonify({"error": "Invalid JSON"}), 400
+        # Attempt to parse JSON safely
+        try:
+            data = json.loads(raw_request_data)
+        except json.JSONDecodeError as e:
+            print(f"JSON Parsing Error: {e}")
+            return jsonify({"error": "Invalid JSON format"}), 400
 
-        # Handle both lowercase and capitalized field names
+        # Normalize field names (handles both lowercase and Marketo capitalization)
         email = data.get("email") or data.get("Email")
         first_name = data.get("first_name") or data.get("FirstName", "")
         last_name = data.get("last_name") or data.get("LastName", "")
@@ -90,7 +95,7 @@ def get_company_info(company_name):
             api_key=OPENAI_API_KEY
         )
         company_info = response['choices'][0]['message']['content']
-        return eval(company_info)  # Convert JSON string to dictionary
+        return json.loads(company_info)  # Convert JSON string to dictionary
 
     except Exception as e:
         print(f"OpenAI Error: {e}")
