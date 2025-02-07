@@ -44,6 +44,20 @@ EMPLOYEE_BUCKETS = {
     "10000+": "10000+"
 }
 
+def standardize_revenue(value):
+    """Normalize revenue into a predefined bucket."""
+    for key, bucket in REVENUE_BUCKETS.items():
+        if key in value:
+            return bucket
+    return "Unknown"
+
+def standardize_employee_size(value):
+    """Normalize employee size into a predefined bucket."""
+    for key, bucket in EMPLOYEE_BUCKETS.items():
+        if key in value:
+            return bucket
+    return "Unknown"
+
 def get_marketo_access_token():
     """Fetch a new Marketo access token if expired."""
     global MARKETO_ACCESS_TOKEN, MARKETO_TOKEN_EXPIRY
