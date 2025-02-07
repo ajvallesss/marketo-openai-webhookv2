@@ -142,7 +142,13 @@ def get_company_info(company_name):
             temperature=0.7
         )
 
-        company_info = response.choices[0].message.content
+        if not response.choices or not response.choices[0].message.content.strip():
+            print("🚨 OpenAI Response is empty!")
+            raise ValueError("OpenAI returned an empty response.")
+
+        company_info = response.choices[0].message.content.strip()
+        print(f"🧠 Raw OpenAI Response: {company_info}")  # Log full response
+
         return json.loads(company_info)  # Convert JSON string to dictionary
 
     except Exception as e:
