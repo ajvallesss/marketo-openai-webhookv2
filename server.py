@@ -18,32 +18,6 @@ MARKETO_BASE_URL = os.getenv("MARKETO_BASE_URL")
 MARKETO_ACCESS_TOKEN = None
 MARKETO_TOKEN_EXPIRY = 0  # Unix timestamp
 
-# Cache for company data (ensures consistency across employees)
-COMPANY_CACHE = {}
-
-# Revenue and Employee Size Buckets for Standardization
-REVENUE_BUCKETS = {
-    "Under $1M": "< $1M",
-    "$1M-$10M": "$1M - $10M",
-    "$10M-$50M": "$10M - $50M",
-    "$50M-$100M": "$50M - $100M",
-    "$100M-$500M": "$100M - $500M",
-    "$500M-$1B": "$500M - $1B",
-    "$1B-$10B": "$1B - $10B",
-    "$10B+": "$10B+"
-}
-
-EMPLOYEE_BUCKETS = {
-    "1-10": "1-10",
-    "11-50": "11-50",
-    "51-200": "51-200",
-    "201-500": "201-500",
-    "501-1000": "501-1000",
-    "1001-5000": "1001-5000",
-    "5001-10000": "5001-10000",
-    "10000+": "10000+"
-}
-
 def get_marketo_access_token():
     """Fetch a new Marketo access token if expired."""
     global MARKETO_ACCESS_TOKEN, MARKETO_TOKEN_EXPIRY
@@ -62,7 +36,7 @@ def get_marketo_access_token():
 
     try:
         response = requests.get(token_url, params=params)
-        response.raise_for_status()
+        response.raise_for_status()  # Raise error if request fails
         token_data = response.json()
 
         MARKETO_ACCESS_TOKEN = token_data["access_token"]
@@ -115,7 +89,7 @@ def webhook():
         print(f"✅ Received: email={email}, company={company}")
 
         # Get enriched company details from OpenAI
-        company_info = get_company_info(company, email)
+        company_info = get_company_info(company)
 
         # Extract OpenAI-generated fields
         industry = company_info.get("GPT_Industry__c", "Unknown")
@@ -141,15 +115,10 @@ def webhook():
 
 
 def get_company_info(company_name, email=None):
-    """Fetch company info using OpenAI, and use cached data if available."""
+    """Fetch company info using OpenAI with function calling, and use domain if the company is not found."""
 
     # Extract domain from email if company details are missing
     domain = email.split("@")[-1] if email and "@" in email else None
-
-    # Use cached data if available
-    if company_name in COMPANY_CACHE:
-        print(f"✅ Using Cached Data for {company_name}")
-        return COMPANY_CACHE[company_name]
 
     prompt = f"""
     You are an AI assistant with access to business intelligence data. Your task is to extract business information for the company: **"{company_name}"**.
@@ -158,11 +127,13 @@ def get_company_info(company_name, email=None):
 
     **Provide the following details**:
     - **GPT_Industry__c**: The primary industry sector.
-    - **GPT_Revenue__c**: One of these standardized ranges: {list(REVENUE_BUCKETS.keys())}.
-    - **GPT_Company_Size__c**: One of these standardized ranges: {list(EMPLOYEE_BUCKETS.keys())}.
-    - **GPT_Fit_Assessment__c**: Would this company be a good fit for Coalesce.io? If yes, explain why in 1-2 sentences.
+    - **GPT_Revenue__c**: Estimated annual revenue in USD (e.g., "$10M-$50M").
+    - **GPT_Company_Size__c**: Employee count in these ranges: ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10,000", "10,000+"].
+    - **GPT_Fit_Assessment__c**: A **short blurb (1-2 sentences)** about what this company does.
 
-    **Respond strictly in JSON format**:
+    **If no company data is found, infer details based on the domain and public data sources.**
+
+    **Respond strictly in JSON format without any additional text**:
     {{
       "GPT_Industry__c": "...",
       "GPT_Revenue__c": "...",
@@ -175,21 +146,33 @@ def get_company_info(company_name, email=None):
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
         response = client.chat.completions.create(
-            model="gpt-4-turbo",
+            model="gpt-4-turbo",  # NEWER, FASTER, CHEAPER MODEL
             messages=[{"role": "user", "content": prompt}],
+            functions=[{
+                "name": "get_company_info",
+                "description": "Retrieves structured company information based on available business intelligence data.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "GPT_Industry__c": {"type": "string"},
+                        "GPT_Revenue__c": {"type": "string"},
+                        "GPT_Company_Size__c": {"type": "string"},
+                        "GPT_Fit_Assessment__c": {"type": "string"}
+                    },
+                    "required": ["GPT_Industry__c", "GPT_Revenue__c", "GPT_Company_Size__c", "GPT_Fit_Assessment__c"]
+                }
+            }],
             temperature=0.5
         )
 
-        if not response.choices or not response.choices[0].message.content.strip():
-            raise ValueError("OpenAI returned an empty response.")
+        if not response.choices or not response.choices[0].message.function_call:
+            print("🚨 OpenAI Function Call Failed!")
+            raise ValueError("OpenAI did not return structured company data.")
 
-        company_info = json.loads(response.choices[0].message.content.strip())
+        company_info = response.choices[0].message.function_call.arguments
+        print(f"🧠 OpenAI Response: {company_info}")  # Log full response
 
-        # Cache company data
-        COMPANY_CACHE[company_name] = company_info
-        print(f"🧠 Cached Company Data: {company_info}")
-
-        return company_info
+        return json.loads(company_info)  # Convert JSON string to dictionary
 
     except Exception as e:
         print(f"🚨 OpenAI Error: {e}")
@@ -199,6 +182,7 @@ def get_company_info(company_name, email=None):
             "GPT_Company_Size__c": "Unknown",
             "GPT_Fit_Assessment__c": "Unknown"
         }
+
 
 
 def update_marketo(email, first_name, last_name, industry, revenue, company_size, fit_assessment):
@@ -230,4 +214,16 @@ def update_marketo(email, first_name, last_name, industry, revenue, company_size
             "Content-Type": "application/json"
         }
 
-        response = 
+        response = requests.post(f"{MARKETO_BASE_URL}/rest/v1/leads.json", json=payload, headers=headers)
+        
+        print(f"📨 Marketo Response: {response.status_code} {response.text}")
+
+        return response.json()
+
+    except Exception as e:
+        print(f"🚨 Marketo API Error: {e}")
+        return {"error": str(e)}
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
