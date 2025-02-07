@@ -3,14 +3,12 @@ import openai
 import requests
 import os
 import json
-import re  # Import regex to clean extra quotes
 
 app = Flask(__name__)
 
 # Load environment variables
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-MARKETO_CLIENT_ID = os.getenv("MARKETO_CLIENT_ID")
-MARKETO_CLIENT_SECRET = os.getenv("MARKETO_CLIENT_SECRET")
+MARKETO_ACCESS_TOKEN = "8aecc22e-c75a-409b-b2f6-ff38fb79682a:ab"  # Replace with valid token
 MARKETO_BASE_URL = os.getenv("MARKETO_BASE_URL")
 
 @app.route("/")
@@ -22,25 +20,11 @@ def home():
 def webhook():
     """Handles webhook requests from Marketo."""
     try:
-        # Log raw request for debugging
-        raw_request_data = request.data.decode("utf-8")
-        print(f"Raw Request Data: {raw_request_data}")
+        data = request.json  # Parse JSON payload
 
-        # Remove extra double quotes from field values
-        cleaned_data = re.sub(r'""([^""]*)""', r'"\1"', raw_request_data)
-
-        # Ensure request is JSON
-        if not request.is_json:
-            return jsonify({"error": "Unsupported Media Type. Expected application/json"}), 415
-
-        # Attempt to parse JSON safely
-        try:
-            data = json.loads(cleaned_data)
-        except json.JSONDecodeError as e:
-            print(f"JSON Parsing Error: {e}")
+        if not data:
             return jsonify({"error": "Invalid JSON format"}), 400
 
-        # Normalize field names (handles both lowercase and Marketo capitalization)
         email = data.get("email") or data.get("Email")
         first_name = data.get("first_name") or data.get("FirstName", "")
         last_name = data.get("last_name") or data.get("LastName", "")
@@ -49,20 +33,23 @@ def webhook():
         if not email or not company:
             return jsonify({"error": "Missing required fields (email, company)"}), 400
 
-        # Log received data
-        print(f"Received: email={email}, company={company}")
+        print(f"✅ Received: email={email}, company={company}")
 
-        # Get company details from OpenAI
+        # Get enriched company details from OpenAI
         company_info = get_company_info(company)
 
-        # Extract fields with correct Marketo API field names
+        # Extract OpenAI-generated fields
         industry = company_info.get("GPT_Industry__c", "Unknown")
         revenue = company_info.get("GPT_Revenue__c", "Unknown")
         company_size = company_info.get("GPT_Company_Size__c", "Unknown")
-        company_fit = company_info.get("GPT_Fit_Assessment__c", "Unknown")
+        fit_assessment = company_info.get("GPT_Fit_Assessment__c", "Unknown")
+
+        print(f"🧠 OpenAI Response: {company_info}")
 
         # Send enriched data to Marketo
-        marketo_response = update_marketo(email, first_name, last_name, industry, revenue, company_size, company_fit)
+        marketo_response = update_marketo(email, first_name, last_name, industry, revenue, company_size, fit_assessment)
+
+        print(f"📨 Marketo Response: {marketo_response}")
 
         return jsonify({
             "success": True,
@@ -70,11 +57,12 @@ def webhook():
         })
 
     except Exception as e:
-        print(f"Webhook Error: {e}")
+        print(f"🚨 Webhook Error: {e}")
         return jsonify({"error": str(e)}), 500
 
+
 def get_company_info(company_name):
-    """Fetch company info using OpenAI."""
+    """Fetch company info using OpenAI with updated API calls."""
     prompt = f"""
     Find the following details for this company: {company_name}
     
@@ -93,16 +81,19 @@ def get_company_info(company_name):
     """
 
     try:
-        response = openai.ChatCompletion.create(
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)  # OpenAI Client
+
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
-            api_key=OPENAI_API_KEY
+            temperature=0.7
         )
-        company_info = response['choices'][0]['message']['content']
+
+        company_info = response.choices[0].message.content
         return json.loads(company_info)  # Convert JSON string to dictionary
 
     except Exception as e:
-        print(f"OpenAI Error: {e}")
+        print(f"🚨 OpenAI Error: {e}")
         return {
             "GPT_Industry__c": "Unknown",
             "GPT_Revenue__c": "Unknown",
@@ -110,42 +101,39 @@ def get_company_info(company_name):
             "GPT_Fit_Assessment__c": "Unknown"
         }
 
-def update_marketo(email, first_name, last_name, industry, revenue, company_size, company_fit):
+
+def update_marketo(email, first_name, last_name, industry, revenue, company_size, fit_assessment):
     """Send enriched data to Marketo."""
     try:
-        access_token = "8aecc22e-c75a-409b-b2f6-ff38fb79682a:ab"  # Replace with real token
-
         payload = {
             "action": "createOrUpdate",
             "lookupField": "email",
             "input": [
                 {
-                    "Email": email,
+                    "email": email,
                     "FirstName": first_name,
                     "LastName": last_name,
                     "GPT_Industry__c": industry,
                     "GPT_Revenue__c": revenue,
                     "GPT_Company_Size__c": company_size,
-                    "GPT_Fit_Assessment__c": company_fit
+                    "GPT_Fit_Assessment__c": fit_assessment
                 }
             ]
         }
 
         headers = {
-            "Authorization": f"Bearer {access_token}",
+            "Authorization": f"Bearer {MARKETO_ACCESS_TOKEN}",
             "Content-Type": "application/json"
         }
 
         response = requests.post(f"{MARKETO_BASE_URL}/rest/v1/leads.json", json=payload, headers=headers)
-        
-        # Log Marketo response
-        print(f"Marketo Response: {response.status_code} {response.text}")
 
         return response.json()
 
     except Exception as e:
-        print(f"Marketo API Error: {e}")
+        print(f"🚨 Marketo API Error: {e}")
         return {"error": str(e)}
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
