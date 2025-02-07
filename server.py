@@ -196,27 +196,86 @@ def get_company_info(company_name, email=None):
     # Extract domain from email if company details are missing
     domain = email.split("@")[-1] if email and "@" in email else None
 
+    # Check if we already processed this company
     if company_name in COMPANY_CACHE:
         print(f"✅ Using Cached Data for {company_name}")
         return COMPANY_CACHE[company_name]
 
     prompt = f"""
-    Find business information for: **"{company_name}"**.
-    If the exact company is not found, **use the domain** "{domain}" and infer details.
+    You are an AI assistant with access to business intelligence data. Your task is to extract business information for the company: **"{company_name}"**.
 
-    Provide:
-    - **GPT_Industry__c**: Primary industry.
-    - **GPT_Revenue__c**: Choose **one**: {list(REVENUE_BUCKETS.keys())}.
-    - **GPT_Company_Size__c**: Choose **one**: {list(EMPLOYEE_BUCKETS.keys())}.
-    - **GPT_Fit_Assessment__c**: Would this company be a **good fit for Coalesce.io**? Explain why.
+    If the exact company is not found, **use the domain** "{domain}" (if available) and infer company details based on business directories, LinkedIn, Crunchbase, company websites, and news reports.
 
-    **Respond in JSON format**:
+    **Provide the following details**:
+    - **GPT_Industry__c**: The primary industry sector.
+    - **GPT_Revenue__c**: Estimated annual revenue in USD. Pick only **one** of these standard ranges:
+      ["Under $1M", "$1M-$10M", "$10M-$50M", "$50M-$100M", "$100M-$500M", "$500M-$1B", "$1B-$10B", "$10B+"]
+    - **GPT_Company_Size__c**: Employee count in these ranges: ["1-10", "11-50", "51-200", "201-500", "501-1000", "1001-5000", "5001-10,000", "10,000+"].
+    - **GPT_Fit_Assessment__c**: Would this company be a **good fit for Coalesce.io**? 
+      - If **yes**, explain why in 1-2 sentences.
+      - If **no**, briefly explain why it might not be an ideal fit.
+
+    **If no company data is found, infer details based on the domain and public data sources.**
+
+    **Respond strictly in JSON format without any additional text**:
     {{
       "GPT_Industry__c": "...",
       "GPT_Revenue__c": "...",
       "GPT_Company_Size__c": "...",
       "GPT_Fit_Assessment__c": "..."
     }}
+    """
+
+    try:
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
+        response = client.chat.completions.create(
+            model="gpt-4-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.5
+        )
+
+        # Handle cases where OpenAI returns an empty response
+        if not response.choices or not response.choices[0].message.content.strip():
+            print("🚨 OpenAI Response is empty!")
+            raise ValueError("OpenAI returned an empty response.")
+
+        company_info = response.choices[0].message.content.strip()
+        parsed_company_info = json.loads(company_info)
+
+        # Debugging logs
+        print(f"🧠 Raw OpenAI Response: {parsed_company_info}")
+
+        # Standardize Revenue & Employee Size
+        parsed_company_info["GPT_Revenue__c"] = standardize_revenue(parsed_company_info.get("GPT_Revenue__c", "Unknown"))
+        parsed_company_info["GPT_Company_Size__c"] = standardize_employee_size(parsed_company_info.get("GPT_Company_Size__c", "Unknown"))
+
+        # If OpenAI response is still "Unknown," log a warning
+        if parsed_company_info["GPT_Revenue__c"] == "Unknown" or parsed_company_info["GPT_Company_Size__c"] == "Unknown":
+            print(f"⚠️ OpenAI did not find valid data for {company_name}. Check if the company name is accurate.")
+
+        # Cache the result so all future leads from this company are **consistent**
+        COMPANY_CACHE[company_name] = parsed_company_info
+        print(f"🧠 Cached Company Data: {parsed_company_info}")
+
+        return parsed_company_info
+
+    except json.JSONDecodeError as json_err:
+        print(f"🚨 JSON Decoding Error from OpenAI: {json_err}")
+        return {
+            "GPT_Industry__c": "Unknown",
+            "GPT_Revenue__c": "Unknown",
+            "GPT_Company_Size__c": "Unknown",
+            "GPT_Fit_Assessment__c": "Unknown"
+        }
+    except Exception as e:
+        print(f"🚨 OpenAI Error: {e}")
+        return {
+            "GPT_Industry__c": "Unknown",
+            "GPT_Revenue__c": "Unknown",
+            "GPT_Company_Size__c": "Unknown",
+            "GPT_Fit_Assessment__c": "Unknown"
+        }
     """
 
     try:
