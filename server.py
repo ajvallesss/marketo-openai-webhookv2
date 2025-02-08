@@ -121,7 +121,7 @@ def get_company_info(company_name, email=None):
     domain = email.split("@")[1] if email and "@" in email else None
     
     prompt = f"""
-    You are an AI assistant specializing in business intelligence. Your task is to research and provide structured company data for **"{company_name}"**.
+    You are an AI assistant specializing in business intelligence. Your task is to research and provide structured company data for **"{company_name}"**. Try to keep all the data formats the same and all information for each unique company the same. For examples if we get mutliple people from the same company, their company data should all match.
     
     **Data Sources to Consider:**
     - LinkedIn company pages
@@ -130,14 +130,14 @@ def get_company_info(company_name, email=None):
     - Company websites
     - Business news articles
     
-    If the exact company is not found, use the domain "{domain}" (if available) to infer details. Prioritize reputable sources and avoid user-generated or unreliable data. Try to keep all of the information from unique domains the same for multiple users. For Example if you get ten people from the company Snowflake all of the data should be the same for each of the ten people
+    If the exact company is not found, use the domain "{domain}" (if available) to infer details. Prioritize reputable sources and avoid user-generated or unreliable data. Try to keep all of the information from unique domains the same for multiple users. For Example if you get ten people from the company Snowflake all of the data should match for each of the ten people
     
     **Required Output (JSON format only):**
     {{
       "GPT_Industry__c": "Industry sector (e.g., SaaS, FinTech, Retail, etc.)",
       "GPT_Revenue__c": "Estimated annual revenue range (e.g., '$10M-$50M')",
       "GPT_Company_Size__c": "Employee count category (e.g., '51-200', '5001-10,000')",
-      "GPT_Fit_Assessment__c": "Short summary of what the company does"
+      "GPT_Fit_Assessment__c": "Short summary of what the company does and if you think they will be a good fit for Coalesce.io Products"
     }}
     
     Ensure accuracy by cross-referencing data from multiple sources before making an inference.
