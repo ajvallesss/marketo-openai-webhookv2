@@ -115,30 +115,47 @@ def webhook():
 
 
 def get_company_info(company_name, email=None):
-    """Fetch company info using OpenAI with function calling, prioritizing reputable sources."""
-    
-    # Extract domain from email if available
+    """Fetch company info using OpenAI with structured JSON response."""
+
     domain = email.split("@")[1] if email and "@" in email else None
-    
+
     prompt = f"""
-    You are an AI assistant specializing in business intelligence. Your task is to research and provide structured company data for **"{company_name}"**.
+    You are an AI assistant specializing in business intelligence. Provide structured company data for "{company_name}".
     
-    **Data Sources to Consider:**
-    - LinkedIn company pages
-    - Google search results
-    - Crunchbase profiles
-    - Company websites
-    - Business news articles
-    
-    If the exact company is not found, use the domain "{domain}" (if available) to infer details. Prioritize reputable sources and avoid user-generated or unreliable data.
-    
-    **Required Output (JSON format only):**
-    {{
-      "GPT_Industry__c": "Industry sector (e.g., SaaS, FinTech, Retail, etc.)",
-      "GPT_Revenue__c": "Estimated annual revenue range (e.g., '$10M-$50M')",
-      "GPT_Company_Size__c": "Employee count category (e.g., '51-200', '5001-10,000')",
-      "GPT_Fit_Assessment__c": "Short summary of what the company does"
-    }}
+    **If the exact company is not found, use the domain "{domain}" to infer details.**  
+    Prioritize reputable sources like LinkedIn, Crunchbase, and company websites. Avoid user-generated content.
+
+    **Return JSON output only with these fields:**
+    - GPT_Industry__c: The industry (e.g., SaaS, FinTech).
+    - GPT_Revenue__c: Estimated revenue range (e.g., "$10M-$50M").
+    - GPT_Company_Size__c: Employee count category (e.g., "51-200").
+    - GPT_Fit_Assessment__c: A short summary of what the company does.
+    """
+
+    try:
+        client = openai.OpenAI(api_key=OPENAI_API_KEY)
+
+        response = client.chat.completions.create(
+            model="gpt-4-turbo",
+            messages=[{"role": "user", "content": prompt}],
+            response_format="json",  # ✅ Enforces JSON output
+            temperature=0.4
+        )
+
+        structured_response = json.loads(response.choices[0].message.content)  
+        print(f"🧠 OpenAI Response: {structured_response}")
+
+        return structured_response
+
+    except (json.JSONDecodeError, IndexError, KeyError) as e:
+        print(f"🚨 OpenAI Parsing Error: {e}")
+        return {
+            "GPT_Industry__c": "Unknown",
+            "GPT_Revenue__c": "Unknown",
+            "GPT_Company_Size__c": "Unknown",
+            "GPT_Fit_Assessment__c": "Unknown"
+        }
+
     
     Ensure accuracy by cross-referencing data from multiple sources before making an inference.
     """
