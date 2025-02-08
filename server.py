@@ -97,12 +97,7 @@ def webhook():
         company_size = company_info.get("GPT_Company_Size__c", "Unknown")
         fit_assessment = company_info.get("GPT_Fit_Assessment__c", "Unknown")
 
-        print(f"🧠 OpenAI Response (Company Info): {company_info}")
-
-        # Get enriched person details from OpenAI
-        person_info = get_person_info(first_name, last_name, company, email)
-
-        print(f"🕵️ OpenAI Response (Person Info): {person_info}")
+        print(f"🧠 OpenAI Response: {company_info}")
 
         # Send enriched data to Marketo
         marketo_response = update_marketo(email, first_name, last_name, industry, revenue, company_size, fit_assessment)
@@ -111,8 +106,7 @@ def webhook():
 
         return jsonify({
             "success": True,
-            "marketo_response": marketo_response,
-            "person_info": person_info
+            "marketo_response": marketo_response
         })
 
     except Exception as e:
@@ -120,28 +114,35 @@ def webhook():
         return jsonify({"error": str(e)}), 500
 
 
-def get_person_info(first_name, last_name, company, email):
-    """Fetch personal contact insights using OpenAI."""
+def get_company_info(company_name, email=None):
+    """Fetch company info using OpenAI with function calling, prioritizing reputable sources."""
+    
+    # Extract domain from email if available
+    domain = email.split("@")[1] if email and "@" in email else None
     
     prompt = f"""
-    You are a research assistant. Your job is to find publicly available information on **{first_name} {last_name}**, who works at **{company}**.
-
+    You are an AI assistant specializing in business intelligence. Your task is to research and provide structured company data for **"{company_name}"**. Try to keep all the data formats the same and all information for each unique company the same. For examples if we get mutliple people from the same company, their company data should all match.
+    
     **Data Sources to Consider:**
-    - LinkedIn profiles
-    - The company's website (about/team page)
-    - Other public sources like Twitter, blogs, or industry sites
-
-    **Required JSON Output:**
+    - LinkedIn company pages
+    - Google search results
+    - Crunchbase profiles
+    - Company websites
+    - Business news articles
+    
+    If the exact company is not found, use the domain "{domain}" (if available) to infer details. Prioritize reputable sources and avoid user-generated or unreliable data. Try to keep all of the information from unique domains the same for multiple users. For Example if you get ten people from the company Snowflake all of the data should match for each of the ten people
+    
+    **Required Output (JSON format only):**
     {{
-      "LinkedIn_Profile": "LinkedIn URL if available, otherwise 'Not Found'",
-      "Company_Website_Profile": "URL if they appear on their company's website, otherwise 'Not Found'",
-      "Other_Relevant_Links": ["Any other public links that may be helpful"],
-      "Notes": "Brief summary of their role or notable details (if available)"
+      "GPT_Industry__c": "Industry sector (e.g., SaaS, FinTech, Retail, etc.)",
+      "GPT_Revenue__c": "Estimated annual revenue range (e.g., '$10M-$50M')",
+      "GPT_Company_Size__c": "Employee count category (e.g., '51-200', '5001-10,000')",
+      "GPT_Fit_Assessment__c": "Short summary of what the company does and if you think they will be a good fit for Coalesce.io Products"
     }}
     
-    Ensure data is sourced from reliable places and avoid speculation.
+    Ensure accuracy by cross-referencing data from multiple sources before making an inference.
     """
-
+    
     try:
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
@@ -149,17 +150,17 @@ def get_person_info(first_name, last_name, company, email):
             model="gpt-4-turbo",
             messages=[{"role": "user", "content": prompt}],
             functions=[{
-                "name": "get_person_info",
-                "description": "Finds publicly available information about a person from professional sources.",
+                "name": "get_company_info",
+                "description": "Retrieves structured company information based on verified business sources.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "LinkedIn_Profile": {"type": "string"},
-                        "Company_Website_Profile": {"type": "string"},
-                        "Other_Relevant_Links": {"type": "array", "items": {"type": "string"}},
-                        "Notes": {"type": "string"}
+                        "GPT_Industry__c": {"type": "string"},
+                        "GPT_Revenue__c": {"type": "string"},
+                        "GPT_Company_Size__c": {"type": "string"},
+                        "GPT_Fit_Assessment__c": {"type": "string"}
                     },
-                    "required": ["LinkedIn_Profile", "Company_Website_Profile", "Other_Relevant_Links", "Notes"]
+                    "required": ["GPT_Industry__c", "GPT_Revenue__c", "GPT_Company_Size__c", "GPT_Fit_Assessment__c"]
                 }
             }],
             temperature=0.4
@@ -167,20 +168,73 @@ def get_person_info(first_name, last_name, company, email):
 
         if not response.choices or not response.choices[0].message.function_call:
             print("🚨 OpenAI Function Call Failed!")
-            raise ValueError("OpenAI did not return structured person data.")
+            raise ValueError("OpenAI did not return structured company data.")
 
-        person_info = response.choices[0].message.function_call.arguments
-        return json.loads(person_info)  # Ensure proper JSON parsing
-
+        company_info = response.choices[0].message.function_call.arguments
+        print(f"🧠 OpenAI Response: {company_info}")
+        
+        return json.loads(company_info)  # Ensure proper JSON parsing
+    
+    except json.JSONDecodeError as e:
+        print(f"🚨 JSON Parsing Error: {e}")
+        return {
+            "GPT_Industry__c": "Unknown",
+            "GPT_Revenue__c": "Unknown",
+            "GPT_Company_Size__c": "Unknown",
+            "GPT_Fit_Assessment__c": "Unknown"
+        }
+    
     except Exception as e:
         print(f"🚨 OpenAI Error: {e}")
         return {
-            "LinkedIn_Profile": "Not Found",
-            "Company_Website_Profile": "Not Found",
-            "Other_Relevant_Links": [],
-            "Notes": "No details found"
+            "GPT_Industry__c": "Unknown",
+            "GPT_Revenue__c": "Unknown",
+            "GPT_Company_Size__c": "Unknown",
+            "GPT_Fit_Assessment__c": "Unknown"
         }
 
 
+
+
+def update_marketo(email, first_name, last_name, industry, revenue, company_size, fit_assessment):
+    """Send enriched data to Marketo."""
+    try:
+        access_token = get_marketo_access_token()  # Ensure valid token
+
+        if not access_token:
+            return {"error": "Failed to retrieve Marketo access token"}
+
+        payload = {
+            "action": "createOrUpdate",
+            "lookupField": "email",
+            "input": [
+                {
+                    "Email": email,
+                    "FirstName": first_name,
+                    "LastName": last_name,
+                    "GPT_Industry__c": industry,
+                    "GPT_Revenue__c": revenue,
+                    "GPT_Company_Size__c": company_size,
+                    "GPT_Fit_Assessment__c": fit_assessment
+                }
+            ]
+        }
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post(f"{MARKETO_BASE_URL}/rest/v1/leads.json", json=payload, headers=headers)
+        
+        print(f"📨 Marketo Response: {response.status_code} {response.text}")
+
+        return response.json()
+
+    except Exception as e:
+        print(f"🚨 Marketo API Error: {e}")
+        return {"error": str(e)}
+
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000) 
