@@ -147,7 +147,7 @@ def get_company_info(company_name, email=None):
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
         response = client.chat.completions.create(
-            model="gpt-4-turbo",
+            model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             functions=[{
                 "name": "get_company_info",
